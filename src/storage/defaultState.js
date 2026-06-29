@@ -6,6 +6,8 @@ export function createDefaultState() {
     version: 1,
     theme: "light",
     selectedListId: inboxId,
+    selectedProfileName: "Default Profile",
+    profiles: ["Default Profile"],
     lists: [
       {
         id: inboxId,

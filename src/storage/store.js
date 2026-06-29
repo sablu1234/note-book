@@ -33,13 +33,17 @@ export function sanitizeState(state) {
   const fallback = createDefaultState();
   const lists = Array.isArray(state.lists) && state.lists.length ? state.lists : fallback.lists;
   const listIds = new Set(lists.map((list) => list.id));
+  const profiles = normalizeProfiles(state.profiles || fallback.profiles);
   const selectedListId = listIds.has(state.selectedListId) ? state.selectedListId : lists[0].id;
+  const selectedProfileName = profiles.includes(state.selectedProfileName) ? state.selectedProfileName : profiles[0];
 
   return {
     version: 1,
     theme: state.theme === "dark" ? "dark" : "light",
     selectedListId,
     selectedTaskType: ["daily", "project"].includes(state.selectedTaskType) ? state.selectedTaskType : "daily",
+    selectedProfileName,
+    profiles,
     lists: lists.map((list) => ({
       id: String(list.id),
       name: String(list.name || "Untitled List"),
@@ -56,6 +60,8 @@ export function sanitizeState(state) {
             dueDate: String(task.dueDate || ""),
             dueTime: String(task.dueTime || ""),
             type: ["daily", "project"].includes(task.type) ? task.type : "daily",
+            profileName: profiles.includes(task.profileName) ? task.profileName : selectedProfileName,
+            projectPrice: Number.isFinite(Number(task.projectPrice)) ? Math.max(0, Number(task.projectPrice)) : 0,
             projectStatus: ["wip", "delivered", "revision", "cancel", "completed", "first-up-done"].includes(task.projectStatus)
               ? task.projectStatus
               : task.completed && task.type === "project"
@@ -89,4 +95,11 @@ export function sanitizeState(state) {
           }))
       : []
   };
+}
+
+function normalizeProfiles(value) {
+  const profiles = Array.isArray(value)
+    ? value.map((profile) => String(profile || "").trim()).filter(Boolean)
+    : [];
+  return [...new Set(profiles)].length ? [...new Set(profiles)] : ["Default Profile"];
 }

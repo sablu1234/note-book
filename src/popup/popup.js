@@ -38,6 +38,10 @@ const elements = {
   sortSelect: $("#sortSelect"),
   dateFilter: $("#dateFilter"),
   customDateFilter: $("#customDateFilter"),
+  profileTools: $("#profileTools"),
+  profileSelect: $("#profileSelect"),
+  addProfileBtn: $("#addProfileBtn"),
+  removeProfileBtn: $("#removeProfileBtn"),
   addListBtn: $("#addListBtn"),
   deleteListBtn: $("#deleteListBtn"),
   addTaskToggle: $("#addTaskToggle"),
@@ -49,6 +53,8 @@ const elements = {
   taskPriority: $("#taskPriority"),
   taskReminder: $("#taskReminder"),
   taskProjectStatus: $("#taskProjectStatus"),
+  taskProfileName: $("#taskProfileName"),
+  taskProjectPrice: $("#taskProjectPrice"),
   customReminder: $("#customReminder"),
   taskDescription: $("#taskDescription"),
   taskUrlTitle: $("#taskUrlTitle"),
@@ -67,6 +73,8 @@ const elements = {
   editTaskType: $("#editTaskType"),
   editStatus: $("#editStatus"),
   editPriority: $("#editPriority"),
+  editProfileName: $("#editProfileName"),
+  editProjectPrice: $("#editProjectPrice"),
   editColor: $("#editColor"),
   editTags: $("#editTags"),
   completionPanel: $("#completionPanel"),
@@ -105,9 +113,43 @@ elements.dateFilter.addEventListener("change", () => {
 });
 elements.customDateFilter.addEventListener("change", renderTasks);
 
+elements.profileSelect.addEventListener("change", async () => {
+  state.selectedProfileName = elements.profileSelect.value;
+  state = await saveState(state);
+  render();
+});
+
+elements.addProfileBtn.addEventListener("click", async () => {
+  const name = prompt("Profile name");
+  if (!name?.trim()) return;
+  const profileName = name.trim();
+  if (!state.profiles.includes(profileName)) state.profiles.push(profileName);
+  state.selectedProfileName = profileName;
+  state = await saveState(state);
+  render();
+});
+
+elements.removeProfileBtn.addEventListener("click", async () => {
+  if (state.profiles.length === 1) {
+    alert("Keep at least one profile.");
+    return;
+  }
+  const profileName = elements.profileSelect.value;
+  if (!confirm(`Remove profile "${profileName}"? Existing projects will move to another profile.`)) return;
+  const nextProfile = state.profiles.find((profile) => profile !== profileName);
+  state.profiles = state.profiles.filter((profile) => profile !== profileName);
+  state.selectedProfileName = nextProfile;
+  state.tasks.forEach((task) => {
+    if (task.profileName === profileName) task.profileName = nextProfile;
+  });
+  state = await saveState(state);
+  render();
+});
+
 elements.editStatus.addEventListener("change", syncCompletionFields);
 elements.editTaskType.addEventListener("change", () => {
   populateEditStatusOptions(elements.editTaskType.value);
+  syncProjectFields();
   syncCompletionFields();
 });
 elements.editCompletionPreset.addEventListener("change", syncCompletionFields);
@@ -177,6 +219,8 @@ elements.taskForm.addEventListener("submit", async (event) => {
   const task = createTask({
     listId: state.selectedListId,
     type: state.selectedTaskType,
+    profileName: state.selectedTaskType === "project" ? elements.taskProfileName.value : state.selectedProfileName,
+    projectPrice: state.selectedTaskType === "project" ? elements.taskProjectPrice.value : 0,
     title: elements.taskTitle.value,
     description: elements.taskDescription.value,
     dueDate: elements.taskDate.value,
@@ -243,6 +287,8 @@ elements.editForm.addEventListener("submit", async (event) => {
     dueDate: elements.editDate.value,
     dueTime: elements.editTime.value,
     type: editedType,
+    profileName: editedType === "project" ? elements.editProfileName.value : state.selectedProfileName,
+    projectPrice: editedType === "project" ? elements.editProjectPrice.value : 0,
     projectStatus: editedType === "project" ? editedStatus : "wip",
     completed: nextCompleted,
     completedAt: nextCompleted ? task.completedAt || now() : 0,
@@ -307,6 +353,7 @@ document.addEventListener("keydown", (event) => {
 
 function render() {
   renderTaskType();
+  renderProfiles();
   renderLists();
   renderDashboard();
   renderTasks();
@@ -315,11 +362,29 @@ function render() {
 function renderTaskType() {
   state.selectedTaskType = state.selectedTaskType || "daily";
   elements.taskTypeSelect.value = state.selectedTaskType;
+  elements.profileTools.classList.toggle("hidden", state.selectedTaskType !== "project");
   elements.taskProjectStatus.classList.toggle("hidden", state.selectedTaskType !== "project");
+  elements.taskProfileName.classList.toggle("hidden", state.selectedTaskType !== "project");
+  elements.taskProjectPrice.classList.toggle("hidden", state.selectedTaskType !== "project");
   elements.addTaskToggle.querySelector("strong").textContent =
     state.selectedTaskType === "project" ? "Add Running Project" : "Add New Task";
   elements.taskTitle.placeholder =
     state.selectedTaskType === "project" ? "New project title" : "New task title";
+}
+
+function renderProfiles() {
+  state.profiles = state.profiles?.length ? state.profiles : ["Default Profile"];
+  state.selectedProfileName = state.profiles.includes(state.selectedProfileName)
+    ? state.selectedProfileName
+    : state.profiles[0];
+  const options = state.profiles
+    .map((profile) => `<option value="${escapeHtml(profile)}">${escapeHtml(profile)}</option>`)
+    .join("");
+  elements.profileSelect.innerHTML = options;
+  elements.taskProfileName.innerHTML = options;
+  elements.editProfileName.innerHTML = options;
+  elements.profileSelect.value = state.selectedProfileName;
+  elements.taskProfileName.value = state.selectedProfileName;
 }
 
 function openTaskForm() {
@@ -433,6 +498,7 @@ function taskTemplate(task) {
             <input type="checkbox" data-action="complete" ${task.completed ? "checked" : ""}>
             <span></span>
           </label>
+          ${profileControlTemplate(task)}
           <button class="task-title" data-action="edit">${escapeHtml(task.title)}</button>
           <button class="mini-button ${task.pinned ? "active" : ""}" data-action="pin" title="Pin">⌃</button>
           <button class="mini-button ${task.favorite ? "active" : ""}" data-action="favorite" title="Favorite">★</button>
@@ -448,6 +514,7 @@ function taskTemplate(task) {
           ${projectAlert ? `<span class="red-alert">Red alert</span>` : ""}
         </div>
         ${statusCommentSelectTemplate(task)}
+        ${projectPriceTemplate(task)}
         <div class="tag-row">${tags}</div>
         <div class="url-icons">${urls}</div>
       </div>
@@ -487,6 +554,11 @@ function bindTaskActions() {
 
       if (event.currentTarget.dataset.action === "project-status") {
         await updateProjectStatusFromCard(task, event.currentTarget.value);
+        return;
+      }
+
+      if (event.currentTarget.dataset.action === "project-profile") {
+        await updateProjectProfileFromCard(task, event.currentTarget.value);
         return;
       }
 
@@ -541,6 +613,9 @@ function openEditor(taskId) {
   elements.editTaskType.value = task.type || "daily";
   populateEditStatusOptions(elements.editTaskType.value);
   elements.editStatus.value = task.type === "project" ? task.projectStatus || "wip" : task.completed ? "completed" : "pending";
+  syncProjectFields();
+  elements.editProfileName.value = task.profileName || state.selectedProfileName;
+  elements.editProjectPrice.value = task.projectPrice || "";
   elements.editPriority.value = task.priority;
   elements.editColor.value = task.color;
   elements.editTags.value = task.tags.join(", ");
@@ -748,6 +823,13 @@ async function updateProjectStatusFromCard(task, status) {
   render();
 }
 
+async function updateProjectProfileFromCard(task, profileName) {
+  task.profileName = profileName;
+  task.updatedAt = now();
+  state = await saveState(state);
+  renderTasks();
+}
+
 function showSelectedStatusComment(task, commentId) {
   const comment = (task.statusComments || []).find((item) => item.id === commentId);
   if (!comment) return;
@@ -785,6 +867,12 @@ function syncCompletionFields() {
   elements.editCompletionComment.classList.toggle("hidden", elements.editCompletionPreset.value !== "custom");
 }
 
+function syncProjectFields() {
+  const isProject = elements.editTaskType.value === "project";
+  elements.editProfileName.classList.toggle("hidden", !isProject);
+  elements.editProjectPrice.classList.toggle("hidden", !isProject);
+}
+
 function populateEditStatusOptions(type) {
   const options = type === "project" ? PROJECT_STATUS_OPTIONS : DAILY_STATUS_OPTIONS;
   const current = elements.editStatus.value;
@@ -792,6 +880,18 @@ function populateEditStatusOptions(type) {
     .map(([value, label]) => `<option value="${value}">${label}</option>`)
     .join("");
   elements.editStatus.value = options.some(([value]) => value === current) ? current : options[0][0];
+}
+
+function profileControlTemplate(task) {
+  if ((task.type || "daily") !== "project") return "";
+  const selectedProfile = task.profileName || state.selectedProfileName;
+  return `
+    <select class="inline-profile-select" data-action="project-profile" aria-label="Project profile">
+      ${state.profiles
+        .map((profile) => `<option value="${escapeHtml(profile)}" ${profile === selectedProfile ? "selected" : ""}>${escapeHtml(profile)}</option>`)
+        .join("")}
+    </select>
+  `;
 }
 
 function isCompletedStatus(type, status) {
@@ -844,6 +944,24 @@ function statusCommentSelectTemplate(task) {
 
 function projectStatusLabel(status) {
   return PROJECT_STATUS_OPTIONS.find(([value]) => value === status)?.[1] || "WIP";
+}
+
+function projectPriceTemplate(task) {
+  if ((task.type || "daily") !== "project" || !task.projectPrice) return "";
+  const gross = Number(task.projectPrice);
+  const net = gross * 0.8;
+  return `
+    <div class="price-row">
+      <span>Price: ${formatMoney(gross)}</span>
+      <strong>After 20%: ${formatMoney(net)}</strong>
+    </div>
+  `;
+}
+
+function formatMoney(value) {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 2
+  }).format(value);
 }
 
 function escapeHtml(value) {
