@@ -10,7 +10,7 @@ let state = await loadState();
 let activeTaskId = null;
 let showAllCompleted = false;
 
-const COMPLETED_PREVIEW_LIMIT = 3;
+const COMPLETED_PREVIEW_LIMIT = 0;
 const PROJECT_ALERT_MS = 60 * 60 * 60 * 1000;
 const DAILY_STATUS_OPTIONS = [
   ["pending", "Pending"],
@@ -398,7 +398,7 @@ function completedToggleTemplate(tasks) {
   const hiddenCount = Math.max(0, completedCount - COMPLETED_PREVIEW_LIMIT);
   if (!hiddenCount) return "";
 
-  const label = showAllCompleted ? "Show Less Completed" : `See More Completed (${hiddenCount})`;
+  const label = showAllCompleted ? "Hide Completed Tasks" : `See Completed Tasks (${hiddenCount})`;
   const detail = showAllCompleted ? `${completedCount} completed tasks visible` : `${hiddenCount} completed tasks hidden`;
 
   return `
