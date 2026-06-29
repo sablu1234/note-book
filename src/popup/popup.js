@@ -9,6 +9,7 @@ import { faviconFor, hostLabel, normalizeUrl } from "../utils/url.js";
 let state = await loadState();
 let activeTaskId = null;
 let showAllCompleted = false;
+let selectedDeliveryMonth = monthKey(new Date());
 
 const COMPLETED_PREVIEW_LIMIT = 0;
 const PROJECT_ALERT_MS = 60 * 60 * 60 * 1000;
@@ -112,7 +113,6 @@ elements.dateFilter.addEventListener("change", () => {
   renderTasks();
 });
 elements.customDateFilter.addEventListener("change", renderTasks);
-
 elements.profileSelect.addEventListener("change", async () => {
   state.selectedProfileName = elements.profileSelect.value;
   state = await saveState(state);
@@ -238,6 +238,9 @@ elements.taskForm.addEventListener("submit", async (event) => {
     task.completedAt = now();
     task.completionComment = "Completed";
   }
+  if (task.type === "project" && isDeliveryStatus(task.projectStatus)) {
+    task.deliveredAt = now();
+  }
 
   if (normalizedInitialUrl) {
     task.urls.push({
@@ -275,6 +278,7 @@ elements.editForm.addEventListener("submit", async (event) => {
   const editedStatus = elements.editStatus.value;
   const nextCompleted = isCompletedStatus(editedType, editedStatus);
   const completionComment = getEditedCompletionComment();
+  const deliveredAt = editedType === "project" && isDeliveryStatus(editedStatus) ? task.deliveredAt || now() : 0;
   if (editedType === "project" && (!elements.editDate.value || !elements.editTime.value)) {
     alert("Running Project needs a deadline date and time.");
     (!elements.editDate.value ? elements.editDate : elements.editTime).focus();
@@ -293,6 +297,7 @@ elements.editForm.addEventListener("submit", async (event) => {
     completed: nextCompleted,
     completedAt: nextCompleted ? task.completedAt || now() : 0,
     completionComment: nextCompleted ? completionComment : "",
+    deliveredAt,
     priority: elements.editPriority.value,
     color: elements.editColor.value,
     tags: parseTags(elements.editTags.value),
@@ -429,10 +434,67 @@ function renderDashboard() {
   elements.progressFill.style.width = `${percent}%`;
 }
 
+function deliverySummaryTemplate() {
+  if (state.selectedTaskType !== "project") return "";
+
+  const deliveredProjects = state.tasks
+    .filter((task) => task.listId === state.selectedListId)
+    .filter((task) => (task.type || "daily") === "project")
+    .filter((task) => isDeliveryStatus(task.projectStatus))
+    .filter((task) => monthKey(new Date(task.deliveredAt || task.updatedAt || task.createdAt)) === selectedDeliveryMonth);
+
+  const grossTotal = deliveredProjects.reduce((sum, task) => sum + Number(task.projectPrice || 0), 0);
+  const netTotal = grossTotal * 0.8;
+  const deliveredList = deliveredProjects.length
+    ? deliveredProjects.map(deliveredProjectTemplate).join("")
+    : `<div class="subtle-empty">No delivered or completed projects in this month.</div>`;
+
+  return `
+    <section class="delivery-summary" id="deliverySummary">
+      <div class="delivery-header">
+        <div>
+          <p class="eyebrow">Monthly Delivery</p>
+          <h2>Delivered Projects</h2>
+        </div>
+        <input id="deliveryMonthSelect" type="month" value="${escapeHtml(selectedDeliveryMonth)}" aria-label="Select delivery month">
+      </div>
+      <div class="delivery-stats">
+        <article><strong>${deliveredProjects.length}</strong><span>Delivered</span></article>
+        <article><strong>${formatMoney(grossTotal)}</strong><span>Gross</span></article>
+        <article><strong>${formatMoney(netTotal)}</strong><span>After 20%</span></article>
+      </div>
+      <div class="delivery-project-list">${deliveredList}</div>
+    </section>
+  `;
+}
+
+function deliveredProjectTemplate(task) {
+  const gross = Number(task.projectPrice || 0);
+  const net = gross * 0.8;
+  const deliveredDate = new Date(task.deliveredAt || task.updatedAt || task.createdAt);
+  return `
+    <article class="delivery-row">
+      <div>
+        <strong>${escapeHtml(task.title)}</strong>
+        <span>${escapeHtml(task.profileName || "Default Profile")} · ${deliveredDate.toLocaleDateString()}</span>
+      </div>
+      <div>
+        <span>${formatMoney(gross)}</span>
+        <strong>${formatMoney(net)}</strong>
+      </div>
+    </article>
+  `;
+}
+
 function renderTasks() {
   const tasks = filteredTasks();
+  const deliverySummary = deliverySummaryTemplate();
   if (!tasks.length) {
-    elements.taskList.innerHTML = `<div class="empty-state">No tasks found.</div>`;
+    elements.taskList.innerHTML = [
+      deliverySummary,
+      `<div class="empty-state">No tasks found.</div>`
+    ].join("");
+    bindTaskActions();
     renderDashboard();
     return;
   }
@@ -440,6 +502,7 @@ function renderTasks() {
   const visibleTasks = visibleTaskSlice(tasks);
   elements.taskList.innerHTML = [
     ...visibleTasks.map(taskTemplate),
+    deliverySummary,
     completedToggleTemplate(tasks)
   ].join("");
   bindTaskActions();
@@ -527,6 +590,14 @@ function taskTemplate(task) {
 }
 
 function bindTaskActions() {
+  const deliveryMonthSelect = elements.taskList.querySelector("#deliveryMonthSelect");
+  if (deliveryMonthSelect) {
+    deliveryMonthSelect.addEventListener("change", (event) => {
+      selectedDeliveryMonth = event.currentTarget.value || monthKey(new Date());
+      renderTasks();
+    });
+  }
+
   elements.taskList.querySelectorAll(".task-card").forEach((card) => {
     card.addEventListener("dragstart", () => card.classList.add("dragging"));
     card.addEventListener("dragend", async () => {
@@ -789,6 +860,7 @@ function setCompletionState(task, completed) {
   task.completionComment = completed ? getCompletionComment() : "";
   if ((task.type || "daily") === "project") {
     task.projectStatus = completed ? "completed" : "wip";
+    task.deliveredAt = completed ? task.deliveredAt || now() : 0;
   }
 }
 
@@ -801,6 +873,7 @@ async function updateProjectStatusFromCard(task, status) {
   task.completed = status === "completed";
   task.completedAt = task.completed ? task.completedAt || now() : 0;
   task.completionComment = task.completed ? comment?.trim() || "Completed" : "";
+  task.deliveredAt = isDeliveryStatus(status) ? task.deliveredAt || now() : 0;
   task.updatedAt = now();
   task.projectAlertNotifiedAt = 0;
 
@@ -898,6 +971,10 @@ function isCompletedStatus(type, status) {
   return type === "project" ? status === "completed" : status === "completed";
 }
 
+function isDeliveryStatus(status) {
+  return status === "delivered" || status === "completed";
+}
+
 function statusLabel(task) {
   if ((task.type || "daily") !== "project") {
     return task.completed ? { value: "completed", label: "Completed" } : { value: "pending", label: "Pending" };
@@ -962,6 +1039,12 @@ function formatMoney(value) {
   return new Intl.NumberFormat(undefined, {
     maximumFractionDigits: 2
   }).format(value);
+}
+
+function monthKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
 }
 
 function escapeHtml(value) {

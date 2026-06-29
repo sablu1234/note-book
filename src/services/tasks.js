@@ -24,6 +24,7 @@ export function createTask(input) {
     updatedAt: now(),
     completedAt: 0,
     completionComment: "",
+    deliveredAt: 0,
     remindedAt: 0,
     overdueNotifiedAt: 0,
     projectAlertNotifiedAt: 0,

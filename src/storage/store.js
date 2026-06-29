@@ -79,6 +79,7 @@ export function sanitizeState(state) {
             updatedAt: Number(task.updatedAt || Date.now()),
             completedAt: Number(task.completedAt || 0),
             completionComment: String(task.completionComment || ""),
+            deliveredAt: Number(task.deliveredAt || (task.projectStatus === "delivered" ? task.updatedAt || task.createdAt || Date.now() : 0)),
             remindedAt: Number(task.remindedAt || 0),
             overdueNotifiedAt: Number(task.overdueNotifiedAt || 0),
             projectAlertNotifiedAt: Number(task.projectAlertNotifiedAt || 0),
