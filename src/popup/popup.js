@@ -12,6 +12,18 @@ let showAllCompleted = false;
 
 const COMPLETED_PREVIEW_LIMIT = 3;
 const PROJECT_ALERT_MS = 60 * 60 * 60 * 1000;
+const DAILY_STATUS_OPTIONS = [
+  ["pending", "Pending"],
+  ["completed", "Completed"]
+];
+const PROJECT_STATUS_OPTIONS = [
+  ["wip", "WIP"],
+  ["delivered", "Delivered"],
+  ["revision", "Revision"],
+  ["cancel", "Cancel"],
+  ["completed", "Completed"],
+  ["first-up-done", "First Up done"]
+];
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -36,6 +48,7 @@ const elements = {
   taskTime: $("#taskTime"),
   taskPriority: $("#taskPriority"),
   taskReminder: $("#taskReminder"),
+  taskProjectStatus: $("#taskProjectStatus"),
   customReminder: $("#customReminder"),
   taskDescription: $("#taskDescription"),
   taskUrlTitle: $("#taskUrlTitle"),
@@ -93,6 +106,10 @@ elements.dateFilter.addEventListener("change", () => {
 elements.customDateFilter.addEventListener("change", renderTasks);
 
 elements.editStatus.addEventListener("change", syncCompletionFields);
+elements.editTaskType.addEventListener("change", () => {
+  populateEditStatusOptions(elements.editTaskType.value);
+  syncCompletionFields();
+});
 elements.editCompletionPreset.addEventListener("change", syncCompletionFields);
 
 elements.listSelect.addEventListener("change", async () => {
@@ -165,11 +182,18 @@ elements.taskForm.addEventListener("submit", async (event) => {
     dueDate: elements.taskDate.value,
     dueTime: elements.taskTime.value,
     priority: elements.taskPriority.value,
+    projectStatus: state.selectedTaskType === "project" ? elements.taskProjectStatus.value : "wip",
     reminderMinutes,
     tags: elements.taskTags.value,
     color: elements.taskColor.value,
     order: nextOrder()
   });
+
+  if (task.type === "project" && task.projectStatus === "completed") {
+    task.completed = true;
+    task.completedAt = now();
+    task.completionComment = "Completed";
+  }
 
   if (normalizedInitialUrl) {
     task.urls.push({
@@ -203,9 +227,11 @@ elements.editForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const task = findActiveTask();
   if (!task) return;
-  const nextCompleted = elements.editStatus.value === "completed";
+  const editedType = elements.editTaskType.value;
+  const editedStatus = elements.editStatus.value;
+  const nextCompleted = isCompletedStatus(editedType, editedStatus);
   const completionComment = getEditedCompletionComment();
-  if (elements.editTaskType.value === "project" && (!elements.editDate.value || !elements.editTime.value)) {
+  if (editedType === "project" && (!elements.editDate.value || !elements.editTime.value)) {
     alert("Running Project needs a deadline date and time.");
     (!elements.editDate.value ? elements.editDate : elements.editTime).focus();
     return;
@@ -216,7 +242,8 @@ elements.editForm.addEventListener("submit", async (event) => {
     description: elements.editDescription.value.trim(),
     dueDate: elements.editDate.value,
     dueTime: elements.editTime.value,
-    type: elements.editTaskType.value,
+    type: editedType,
+    projectStatus: editedType === "project" ? editedStatus : "wip",
     completed: nextCompleted,
     completedAt: nextCompleted ? task.completedAt || now() : 0,
     completionComment: nextCompleted ? completionComment : "",
@@ -288,6 +315,7 @@ function render() {
 function renderTaskType() {
   state.selectedTaskType = state.selectedTaskType || "daily";
   elements.taskTypeSelect.value = state.selectedTaskType;
+  elements.taskProjectStatus.classList.toggle("hidden", state.selectedTaskType !== "project");
   elements.addTaskToggle.querySelector("strong").textContent =
     state.selectedTaskType === "project" ? "Add Running Project" : "Add New Task";
   elements.taskTitle.placeholder =
@@ -413,11 +441,13 @@ function taskTemplate(task) {
         ${task.completed && task.completionComment ? `<p class="completion-note">${escapeHtml(task.completionComment)}</p>` : ""}
         <div class="task-meta">
           <span class="type-pill ${task.type === "project" ? "project" : "daily"}">${task.type === "project" ? "project" : "daily"}</span>
+          ${statusControlTemplate(task)}
           <span class="priority ${task.priority}">${task.priority}</span>
           <span>${formatDateTime(task)}</span>
           <span class="${overdue ? "danger-text" : ""}">${formatRemaining(task)}</span>
           ${projectAlert ? `<span class="red-alert">Red alert</span>` : ""}
         </div>
+        ${statusCommentSelectTemplate(task)}
         <div class="tag-row">${tags}</div>
         <div class="url-icons">${urls}</div>
       </div>
@@ -445,7 +475,28 @@ function bindTaskActions() {
     });
   });
 
-  elements.taskList.querySelectorAll("[data-action]").forEach((button) => {
+  elements.taskList.querySelectorAll("select[data-action]").forEach((select) => {
+    ["click", "mousedown", "pointerdown"].forEach((eventName) => {
+      select.addEventListener(eventName, (event) => event.stopPropagation());
+    });
+    select.addEventListener("change", async (event) => {
+      const card = event.target.closest(".task-card");
+      if (!card) return;
+      const task = state.tasks.find((item) => item.id === card.dataset.id);
+      if (!task) return;
+
+      if (event.currentTarget.dataset.action === "project-status") {
+        await updateProjectStatusFromCard(task, event.currentTarget.value);
+        return;
+      }
+
+      if (event.currentTarget.dataset.action === "status-comment") {
+        showSelectedStatusComment(task, event.currentTarget.value);
+      }
+    });
+  });
+
+  elements.taskList.querySelectorAll("button[data-action], input[data-action]").forEach((button) => {
     button.addEventListener("click", async (event) => {
       if (event.currentTarget.dataset.action === "toggle-completed") {
         showAllCompleted = !showAllCompleted;
@@ -488,7 +539,8 @@ function openEditor(taskId) {
   elements.editDate.value = task.dueDate;
   elements.editTime.value = task.dueTime;
   elements.editTaskType.value = task.type || "daily";
-  elements.editStatus.value = task.completed ? "completed" : "pending";
+  populateEditStatusOptions(elements.editTaskType.value);
+  elements.editStatus.value = task.type === "project" ? task.projectStatus || "wip" : task.completed ? "completed" : "pending";
   elements.editPriority.value = task.priority;
   elements.editColor.value = task.color;
   elements.editTags.value = task.tags.join(", ");
@@ -598,10 +650,14 @@ function tasksForCurrentType() {
 }
 
 function isProjectAlert(task) {
-  if ((task.type || "daily") !== "project" || task.completed) return false;
+  if ((task.type || "daily") !== "project" || task.completed || !isActiveProjectStatus(task.projectStatus)) return false;
   const deadline = getDeadline(task);
   if (!deadline) return false;
   return deadline.getTime() - Date.now() <= PROJECT_ALERT_MS;
+}
+
+function isActiveProjectStatus(status) {
+  return !["delivered", "cancel", "completed"].includes(status);
 }
 
 function recentSort(a, b) {
@@ -656,6 +712,46 @@ function setCompletionState(task, completed) {
   task.completed = completed;
   task.completedAt = completed ? now() : 0;
   task.completionComment = completed ? getCompletionComment() : "";
+  if ((task.type || "daily") === "project") {
+    task.projectStatus = completed ? "completed" : "wip";
+  }
+}
+
+async function updateProjectStatusFromCard(task, status) {
+  const previousStatus = task.projectStatus || "wip";
+  const label = projectStatusLabel(status);
+  const comment = prompt(`Comment for ${label}`, "");
+
+  task.projectStatus = status;
+  task.completed = status === "completed";
+  task.completedAt = task.completed ? task.completedAt || now() : 0;
+  task.completionComment = task.completed ? comment?.trim() || "Completed" : "";
+  task.updatedAt = now();
+  task.projectAlertNotifiedAt = 0;
+
+  if (comment?.trim()) {
+    task.statusComments = [
+      ...(task.statusComments || []),
+      {
+        id: uid("status_comment"),
+        status,
+        body: comment.trim(),
+        createdAt: now()
+      }
+    ];
+  }
+
+  if (previousStatus !== status || comment?.trim()) {
+    state = await saveState(state);
+  }
+
+  render();
+}
+
+function showSelectedStatusComment(task, commentId) {
+  const comment = (task.statusComments || []).find((item) => item.id === commentId);
+  if (!comment) return;
+  alert(`${projectStatusLabel(comment.status)}\n\n${comment.body}`);
 }
 
 function getCompletionComment() {
@@ -684,9 +780,70 @@ function getEditedCompletionComment() {
 }
 
 function syncCompletionFields() {
-  const completed = elements.editStatus.value === "completed";
+  const completed = isCompletedStatus(elements.editTaskType.value, elements.editStatus.value);
   elements.completionPanel.classList.toggle("hidden", !completed);
   elements.editCompletionComment.classList.toggle("hidden", elements.editCompletionPreset.value !== "custom");
+}
+
+function populateEditStatusOptions(type) {
+  const options = type === "project" ? PROJECT_STATUS_OPTIONS : DAILY_STATUS_OPTIONS;
+  const current = elements.editStatus.value;
+  elements.editStatus.innerHTML = options
+    .map(([value, label]) => `<option value="${value}">${label}</option>`)
+    .join("");
+  elements.editStatus.value = options.some(([value]) => value === current) ? current : options[0][0];
+}
+
+function isCompletedStatus(type, status) {
+  return type === "project" ? status === "completed" : status === "completed";
+}
+
+function statusLabel(task) {
+  if ((task.type || "daily") !== "project") {
+    return task.completed ? { value: "completed", label: "Completed" } : { value: "pending", label: "Pending" };
+  }
+
+  const match = PROJECT_STATUS_OPTIONS.find(([value]) => value === (task.projectStatus || "wip"));
+  return {
+    value: match?.[0] || "wip",
+    label: match?.[1] || "WIP"
+  };
+}
+
+function statusControlTemplate(task) {
+  const status = statusLabel(task);
+  if ((task.type || "daily") !== "project") {
+    return `<span class="status-pill status-${status.value}">${escapeHtml(status.label)}</span>`;
+  }
+
+  return `
+    <select class="inline-status-select status-${status.value}" data-action="project-status" aria-label="Project status">
+      ${PROJECT_STATUS_OPTIONS.map(
+        ([value, label]) => `<option value="${value}" ${value === status.value ? "selected" : ""}>${label}</option>`
+      ).join("")}
+    </select>
+  `;
+}
+
+function statusCommentSelectTemplate(task) {
+  const comments = task.statusComments || [];
+  if ((task.type || "daily") !== "project" || !comments.length) return "";
+  const latest = comments.at(-1);
+
+  return `
+    <select class="status-comment-select" data-action="status-comment" aria-label="Project status comments">
+      ${comments
+        .map((comment) => {
+          const label = `${projectStatusLabel(comment.status)} - ${comment.body}`;
+          return `<option value="${comment.id}" ${comment.id === latest.id ? "selected" : ""}>${escapeHtml(label)}</option>`;
+        })
+        .join("")}
+    </select>
+  `;
+}
+
+function projectStatusLabel(status) {
+  return PROJECT_STATUS_OPTIONS.find(([value]) => value === status)?.[1] || "WIP";
 }
 
 function escapeHtml(value) {

@@ -552,6 +552,7 @@ textarea:focus {
 .priority,
 .tag-row span,
 .type-pill,
+.status-pill,
 .red-alert {
   border-radius: 999px;
   padding: 3px 8px;
@@ -565,9 +566,51 @@ textarea:focus {
 }
 
 .type-pill.project,
+.status-revision,
 .red-alert {
   background: rgba(220, 38, 38, 0.13);
   color: var(--danger);
+}
+
+.status-pill {
+  background: rgba(104, 117, 138, 0.14);
+  color: var(--muted);
+}
+
+.inline-status-select {
+  width: auto;
+  min-width: 94px;
+  height: 26px;
+  border-radius: 999px;
+  padding: 0 24px 0 9px;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.status-comment-select {
+  width: 100%;
+  height: 34px;
+  margin-top: 8px;
+  border-style: dashed;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-wip,
+.status-first-up-done {
+  background: rgba(37, 99, 235, 0.13);
+  color: var(--accent);
+}
+
+.status-delivered,
+.status-completed {
+  background: rgba(22, 163, 74, 0.13);
+  color: var(--ok);
+}
+
+.status-cancel {
+  background: rgba(104, 117, 138, 0.18);
+  color: var(--muted);
 }
 
 .red-alert {

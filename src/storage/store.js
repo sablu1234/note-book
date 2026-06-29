@@ -56,6 +56,11 @@ export function sanitizeState(state) {
             dueDate: String(task.dueDate || ""),
             dueTime: String(task.dueTime || ""),
             type: ["daily", "project"].includes(task.type) ? task.type : "daily",
+            projectStatus: ["wip", "delivered", "revision", "cancel", "completed", "first-up-done"].includes(task.projectStatus)
+              ? task.projectStatus
+              : task.completed && task.type === "project"
+                ? "completed"
+                : "wip",
             completed: Boolean(task.completed),
             pinned: Boolean(task.pinned),
             favorite: Boolean(task.favorite),
@@ -71,6 +76,14 @@ export function sanitizeState(state) {
             remindedAt: Number(task.remindedAt || 0),
             overdueNotifiedAt: Number(task.overdueNotifiedAt || 0),
             projectAlertNotifiedAt: Number(task.projectAlertNotifiedAt || 0),
+            statusComments: Array.isArray(task.statusComments)
+              ? task.statusComments.map((comment) => ({
+                  id: String(comment.id || ""),
+                  status: String(comment.status || ""),
+                  body: String(comment.body || ""),
+                  createdAt: Number(comment.createdAt || Date.now())
+                }))
+              : [],
             comments: Array.isArray(task.comments) ? task.comments : [],
             urls: Array.isArray(task.urls) ? task.urls : []
           }))

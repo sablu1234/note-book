@@ -58,7 +58,7 @@ async function syncReminderAlarms() {
 
   for (const task of state.tasks) {
     const deadline = getDeadline(task);
-    if (!deadline || task.completed || task.type !== "project" || task.projectAlertNotifiedAt) continue;
+    if (!deadline || task.completed || task.type !== "project" || !isActiveProjectStatus(task.projectStatus) || task.projectAlertNotifiedAt) continue;
     const alertTime = deadline.getTime() - PROJECT_ALERT_MS;
     if (alertTime > at) {
       await chrome.alarms.create(`project-alert:${task.id}`, { when: alertTime });
@@ -121,7 +121,7 @@ async function notifyOverdueTasks() {
 
   for (const task of state.tasks) {
     const deadline = getDeadline(task);
-    if (!deadline || task.completed || task.type !== "project" || task.projectAlertNotifiedAt) continue;
+    if (!deadline || task.completed || task.type !== "project" || !isActiveProjectStatus(task.projectStatus) || task.projectAlertNotifiedAt) continue;
     const remaining = deadline.getTime() - at;
     if (remaining <= PROJECT_ALERT_MS) {
       await chrome.notifications.create(`notebook-project-alert-${task.id}-${at}`, {
@@ -137,4 +137,8 @@ async function notifyOverdueTasks() {
   }
 
   if (changed) await saveState(state);
+}
+
+function isActiveProjectStatus(status) {
+  return !["delivered", "cancel", "completed"].includes(status);
 }

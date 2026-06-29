@@ -9,6 +9,7 @@ export function createTask(input) {
     dueDate: input.dueDate,
     dueTime: input.dueTime,
     type: input.type || "daily",
+    projectStatus: input.projectStatus || "wip",
     completed: false,
     pinned: false,
     favorite: false,
@@ -24,6 +25,7 @@ export function createTask(input) {
     remindedAt: 0,
     overdueNotifiedAt: 0,
     projectAlertNotifiedAt: 0,
+    statusComments: [],
     comments: [],
     urls: []
   };
@@ -45,7 +47,9 @@ export function searchableText(task) {
     task.title,
     task.description,
     task.type,
+    task.projectStatus,
     task.priority,
+    ...((task.statusComments || []).flatMap((comment) => [comment.status, comment.body])),
     task.tags.join(" "),
     ...task.comments.map((comment) => comment.body),
     ...task.urls.flatMap((url) => [url.title, url.href])

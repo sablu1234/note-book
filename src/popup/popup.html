@@ -95,6 +95,14 @@
             <option value="0">None</option>
           </select>
         </div>
+        <select class="hidden" id="taskProjectStatus" aria-label="Project status">
+          <option value="wip">WIP</option>
+          <option value="delivered">Delivered</option>
+          <option value="revision">Revision</option>
+          <option value="cancel">Cancel</option>
+          <option value="completed">Completed</option>
+          <option value="first-up-done">First Up done</option>
+        </select>
         <input class="hidden" id="customReminder" type="number" min="1" max="10080" placeholder="Custom minutes before">
         <textarea id="taskDescription" rows="2" placeholder="Optional description"></textarea>
         <div class="url-row">
