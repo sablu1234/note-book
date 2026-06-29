@@ -441,6 +441,27 @@ textarea:focus {
   transition: transform 160ms ease, border-color 160ms ease, opacity 160ms ease;
 }
 
+.see-more-button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 48px;
+  border: 1px dashed rgba(37, 99, 235, 0.34);
+  border-radius: var(--radius);
+  background: rgba(37, 99, 235, 0.07);
+  color: var(--text);
+  text-align: center;
+}
+
+.see-more-button span {
+  font-weight: 850;
+}
+
+.see-more-button small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .task-card:hover {
   transform: translateY(-1px);
 }
@@ -492,6 +513,18 @@ textarea:focus {
   margin: 7px 0 9px;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.completion-note {
+  border-left: 3px solid var(--ok);
+  padding-left: 9px;
+  color: var(--ok) !important;
+  font-weight: 700;
+}
+
+.completion-panel {
+  display: grid;
+  gap: 8px;
 }
 
 .task-meta,

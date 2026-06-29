@@ -8,6 +8,9 @@ import { faviconFor, hostLabel, normalizeUrl } from "../utils/url.js";
 
 let state = await loadState();
 let activeTaskId = null;
+let showAllCompleted = false;
+
+const COMPLETED_PREVIEW_LIMIT = 3;
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -50,6 +53,9 @@ const elements = {
   editPriority: $("#editPriority"),
   editColor: $("#editColor"),
   editTags: $("#editTags"),
+  completionPanel: $("#completionPanel"),
+  editCompletionPreset: $("#editCompletionPreset"),
+  editCompletionComment: $("#editCompletionComment"),
   commentsList: $("#commentsList"),
   newComment: $("#newComment"),
   addCommentBtn: $("#addCommentBtn"),
@@ -71,12 +77,17 @@ elements.searchInput.addEventListener("input", renderTasks);
 elements.sortSelect.addEventListener("change", renderTasks);
 elements.dateFilter.addEventListener("change", () => {
   elements.customDateFilter.classList.toggle("hidden", elements.dateFilter.value !== "custom");
+  showAllCompleted = false;
   renderTasks();
 });
 elements.customDateFilter.addEventListener("change", renderTasks);
 
+elements.editStatus.addEventListener("change", syncCompletionFields);
+elements.editCompletionPreset.addEventListener("change", syncCompletionFields);
+
 elements.listSelect.addEventListener("change", async () => {
   state.selectedListId = elements.listSelect.value;
+  showAllCompleted = false;
   state = await saveState(state);
   render();
 });
@@ -175,12 +186,16 @@ elements.editForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const task = findActiveTask();
   if (!task) return;
+  const nextCompleted = elements.editStatus.value === "completed";
+  const completionComment = getEditedCompletionComment();
   Object.assign(task, {
     title: elements.editTitle.value.trim(),
     description: elements.editDescription.value.trim(),
     dueDate: elements.editDate.value,
     dueTime: elements.editTime.value,
-    completed: elements.editStatus.value === "completed",
+    completed: nextCompleted,
+    completedAt: nextCompleted ? task.completedAt || now() : 0,
+    completionComment: nextCompleted ? completionComment : "",
     priority: elements.editPriority.value,
     color: elements.editColor.value,
     tags: parseTags(elements.editTags.value),
@@ -293,9 +308,41 @@ function renderTasks() {
     return;
   }
 
-  elements.taskList.innerHTML = tasks.map(taskTemplate).join("");
+  const visibleTasks = visibleTaskSlice(tasks);
+  elements.taskList.innerHTML = [
+    ...visibleTasks.map(taskTemplate),
+    completedToggleTemplate(tasks)
+  ].join("");
   bindTaskActions();
   renderDashboard();
+}
+
+function visibleTaskSlice(tasks) {
+  const completed = tasks.filter((task) => task.completed);
+  if (showAllCompleted || completed.length <= COMPLETED_PREVIEW_LIMIT) return tasks;
+
+  let completedSeen = 0;
+  return tasks.filter((task) => {
+    if (!task.completed) return true;
+    completedSeen += 1;
+    return completedSeen <= COMPLETED_PREVIEW_LIMIT;
+  });
+}
+
+function completedToggleTemplate(tasks) {
+  const completedCount = tasks.filter((task) => task.completed).length;
+  const hiddenCount = Math.max(0, completedCount - COMPLETED_PREVIEW_LIMIT);
+  if (!hiddenCount) return "";
+
+  const label = showAllCompleted ? "Show Less Completed" : `See More Completed (${hiddenCount})`;
+  const detail = showAllCompleted ? `${completedCount} completed tasks visible` : `${hiddenCount} completed tasks hidden`;
+
+  return `
+    <button class="see-more-button" type="button" data-action="toggle-completed">
+      <span>${label}</span>
+      <small>${detail}</small>
+    </button>
+  `;
 }
 
 function taskTemplate(task) {
@@ -321,6 +368,7 @@ function taskTemplate(task) {
           <button class="mini-button ${task.favorite ? "active" : ""}" data-action="favorite" title="Favorite">★</button>
         </div>
         <p>${escapeHtml(task.description || "No description")}</p>
+        ${task.completed && task.completionComment ? `<p class="completion-note">${escapeHtml(task.completionComment)}</p>` : ""}
         <div class="task-meta">
           <span class="priority ${task.priority}">${task.priority}</span>
           <span>${formatDateTime(task)}</span>
@@ -355,11 +403,21 @@ function bindTaskActions() {
 
   elements.taskList.querySelectorAll("[data-action]").forEach((button) => {
     button.addEventListener("click", async (event) => {
+      if (event.currentTarget.dataset.action === "toggle-completed") {
+        showAllCompleted = !showAllCompleted;
+        renderTasks();
+        return;
+      }
+
       const card = event.target.closest(".task-card");
+      if (!card) return;
       const task = state.tasks.find((item) => item.id === card.dataset.id);
       const action = event.currentTarget.dataset.action;
       if (!task) return;
-      if (action === "complete") task.completed = event.currentTarget.checked;
+      if (action === "complete") {
+        const shouldComplete = event.currentTarget.checked;
+        setCompletionState(task, shouldComplete);
+      }
       if (action === "pin") task.pinned = !task.pinned;
       if (action === "favorite") task.favorite = !task.favorite;
       if (action === "delete") {
@@ -389,6 +447,8 @@ function openEditor(taskId) {
   elements.editPriority.value = task.priority;
   elements.editColor.value = task.color;
   elements.editTags.value = task.tags.join(", ");
+  setCompletionEditorValue(task.completionComment);
+  syncCompletionFields();
   renderEditorCollections(task);
   elements.taskDialog.showModal();
   elements.editTitle.focus();
@@ -475,15 +535,20 @@ function filteredTasks() {
   const dateMatched = listTasks.filter(matchesDateFilter);
   const matched = query ? dateMatched.filter((task) => searchableText(task).includes(query)) : dateMatched;
   return matched.sort((a, b) => {
+    if (a.completed !== b.completed) return a.completed ? 1 : -1;
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
     if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
-    if (elements.sortSelect.value === "pending") return Number(a.completed) - Number(b.completed);
-    if (elements.sortSelect.value === "completed") return Number(b.completed) - Number(a.completed);
+    if (elements.sortSelect.value === "pending") return Number(a.completed) - Number(b.completed) || recentSort(a, b);
+    if (elements.sortSelect.value === "completed") return Number(b.completed) - Number(a.completed) || recentSort(a, b);
     if (elements.sortSelect.value === "due") return deadlineSort(a, b);
     if (elements.sortSelect.value === "recent") return b.createdAt - a.createdAt;
     const priority = priorityRank(b.priority) - priorityRank(a.priority);
-    return a.order - b.order || priority;
+    return recentSort(a, b) || priority || a.order - b.order;
   });
+}
+
+function recentSort(a, b) {
+  return b.createdAt - a.createdAt;
 }
 
 function matchesDateFilter(task) {
@@ -528,6 +593,43 @@ function currentList() {
 
 function findActiveTask() {
   return state.tasks.find((task) => task.id === activeTaskId);
+}
+
+function setCompletionState(task, completed) {
+  task.completed = completed;
+  task.completedAt = completed ? now() : 0;
+  task.completionComment = completed ? getCompletionComment() : "";
+}
+
+function getCompletionComment() {
+  const comment = prompt("Completion comment", "Completed");
+  return comment?.trim() || "Completed";
+}
+
+function setCompletionEditorValue(value) {
+  const presets = [...elements.editCompletionPreset.options].map((option) => option.value);
+  if (!value || presets.includes(value)) {
+    elements.editCompletionPreset.value = value || "Completed";
+    elements.editCompletionComment.value = "";
+    return;
+  }
+
+  elements.editCompletionPreset.value = "custom";
+  elements.editCompletionComment.value = value;
+}
+
+function getEditedCompletionComment() {
+  if (elements.editCompletionPreset.value === "custom") {
+    return elements.editCompletionComment.value.trim() || "Completed";
+  }
+
+  return elements.editCompletionPreset.value;
+}
+
+function syncCompletionFields() {
+  const completed = elements.editStatus.value === "completed";
+  elements.completionPanel.classList.toggle("hidden", !completed);
+  elements.editCompletionComment.classList.toggle("hidden", elements.editCompletionPreset.value !== "custom");
 }
 
 function escapeHtml(value) {

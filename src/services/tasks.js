@@ -18,6 +18,8 @@ export function createTask(input) {
     order: input.order || 0,
     createdAt: now(),
     updatedAt: now(),
+    completedAt: 0,
+    completionComment: "",
     remindedAt: 0,
     overdueNotifiedAt: 0,
     comments: [],

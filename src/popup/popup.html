@@ -143,6 +143,16 @@
           <input id="editColor" type="color">
           <input id="editTags" type="text" placeholder="Tags">
         </div>
+        <section class="completion-panel hidden" id="completionPanel">
+          <h3>Completion Comment</h3>
+          <select id="editCompletionPreset" aria-label="Completion comment preset">
+            <option value="Completed">Default: Completed</option>
+            <option value="Done">Done</option>
+            <option value="Reviewed and completed">Reviewed and completed</option>
+            <option value="custom">Other</option>
+          </select>
+          <textarea class="hidden" id="editCompletionComment" rows="2" placeholder="Write completion comment"></textarea>
+        </section>
 
         <section>
           <h3>Notes</h3>

@@ -64,6 +64,8 @@ export function sanitizeState(state) {
             order: Number.isFinite(task.order) ? task.order : index,
             createdAt: Number(task.createdAt || Date.now()),
             updatedAt: Number(task.updatedAt || Date.now()),
+            completedAt: Number(task.completedAt || 0),
+            completionComment: String(task.completionComment || ""),
             remindedAt: Number(task.remindedAt || 0),
             overdueNotifiedAt: Number(task.overdueNotifiedAt || 0),
             comments: Array.isArray(task.comments) ? task.comments : [],
