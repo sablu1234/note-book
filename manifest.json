@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Notebook Task Manager",
+  "description": "A premium offline task manager with notes, reminders, references, and backups.",
+  "version": "1.0.0",
+  "author": "Sablu Hasan",
+  "homepage_url": "https://sablu-hasan.vercel.app/",
+  "action": {
+    "default_title": "Notebook Task Manager",
+    "default_popup": "src/popup/popup.html"
+  },
+  "options_page": "src/options/options.html",
+  "background": {
+    "service_worker": "src/background/serviceWorker.js",
+    "type": "module"
+  },
+  "permissions": [
+    "alarms",
+    "notifications",
+    "storage",
+    "tabs"
+  ],
+  "icons": {
+    "16": "src/assets/icons/icon-16.png",
+    "32": "src/assets/icons/icon-32.png",
+    "48": "src/assets/icons/icon-48.png",
+    "128": "src/assets/icons/icon-128.png"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+N"
+      },
+      "description": "Open Notebook Task Manager"
+    }
+  }
+}

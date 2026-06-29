@@ -1,0 +1,540 @@
+import { loadState, saveState, updateState } from "../storage/store.js";
+import { createTask, parseTags, priorityRank, searchableText } from "../services/tasks.js";
+import { exportBackup, importBackup } from "../services/backup.js";
+import { applyTheme, toggleTheme } from "../services/theme.js";
+import { statCard } from "../components/statCard.js";
+import { formatDateTime, formatRemaining, getDeadline, isOverdue, isToday, now, uid } from "../utils/time.js";
+import { faviconFor, hostLabel, normalizeUrl } from "../utils/url.js";
+
+let state = await loadState();
+let activeTaskId = null;
+
+const $ = (selector) => document.querySelector(selector);
+
+const elements = {
+  dashboard: $("#dashboard"),
+  progressLabel: $("#progressLabel"),
+  progressFill: $("#progressFill"),
+  themeToggle: $("#themeToggle"),
+  searchInput: $("#searchInput"),
+  listSelect: $("#listSelect"),
+  sortSelect: $("#sortSelect"),
+  dateFilter: $("#dateFilter"),
+  customDateFilter: $("#customDateFilter"),
+  addListBtn: $("#addListBtn"),
+  deleteListBtn: $("#deleteListBtn"),
+  addTaskToggle: $("#addTaskToggle"),
+  taskForm: $("#taskForm"),
+  cancelTaskBtn: $("#cancelTaskBtn"),
+  taskTitle: $("#taskTitle"),
+  taskDate: $("#taskDate"),
+  taskTime: $("#taskTime"),
+  taskPriority: $("#taskPriority"),
+  taskReminder: $("#taskReminder"),
+  customReminder: $("#customReminder"),
+  taskDescription: $("#taskDescription"),
+  taskUrlTitle: $("#taskUrlTitle"),
+  taskUrl: $("#taskUrl"),
+  taskTags: $("#taskTags"),
+  taskColor: $("#taskColor"),
+  taskList: $("#taskList"),
+  exportBtn: $("#exportBtn"),
+  importInput: $("#importInput"),
+  taskDialog: $("#taskDialog"),
+  editForm: $("#editForm"),
+  editTitle: $("#editTitle"),
+  editDescription: $("#editDescription"),
+  editDate: $("#editDate"),
+  editTime: $("#editTime"),
+  editStatus: $("#editStatus"),
+  editPriority: $("#editPriority"),
+  editColor: $("#editColor"),
+  editTags: $("#editTags"),
+  commentsList: $("#commentsList"),
+  newComment: $("#newComment"),
+  addCommentBtn: $("#addCommentBtn"),
+  urlsList: $("#urlsList"),
+  newUrlTitle: $("#newUrlTitle"),
+  newUrl: $("#newUrl"),
+  addUrlBtn: $("#addUrlBtn")
+};
+
+applyTheme(state.theme);
+render();
+setInterval(renderTasks, 30000);
+
+elements.themeToggle.addEventListener("click", async () => {
+  state.theme = await toggleTheme(state.theme);
+});
+
+elements.searchInput.addEventListener("input", renderTasks);
+elements.sortSelect.addEventListener("change", renderTasks);
+elements.dateFilter.addEventListener("change", () => {
+  elements.customDateFilter.classList.toggle("hidden", elements.dateFilter.value !== "custom");
+  renderTasks();
+});
+elements.customDateFilter.addEventListener("change", renderTasks);
+
+elements.listSelect.addEventListener("change", async () => {
+  state.selectedListId = elements.listSelect.value;
+  state = await saveState(state);
+  render();
+});
+
+elements.addListBtn.addEventListener("click", async () => {
+  const name = prompt("List name");
+  if (!name?.trim()) return;
+  const list = { id: uid("list"), name: name.trim(), createdAt: now() };
+  state.lists.push(list);
+  state.selectedListId = list.id;
+  state = await saveState(state);
+  render();
+});
+
+elements.deleteListBtn.addEventListener("click", async () => {
+  if (state.lists.length === 1) {
+    alert("Keep at least one list.");
+    return;
+  }
+  const list = currentList();
+  if (!confirm(`Delete "${list.name}" and all tasks inside it?`)) return;
+  state.tasks = state.tasks.filter((task) => task.listId !== list.id);
+  state.lists = state.lists.filter((item) => item.id !== list.id);
+  state.selectedListId = state.lists[0].id;
+  state = await saveState(state);
+  render();
+});
+
+elements.taskReminder.addEventListener("change", () => {
+  elements.customReminder.classList.toggle("hidden", elements.taskReminder.value !== "custom");
+});
+
+elements.addTaskToggle.addEventListener("click", () => {
+  openTaskForm();
+});
+
+elements.cancelTaskBtn.addEventListener("click", () => {
+  closeTaskForm();
+});
+
+elements.taskForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const reminderMinutes =
+    elements.taskReminder.value === "custom" ? elements.customReminder.value : elements.taskReminder.value;
+  const initialUrl = elements.taskUrl.value.trim();
+  const normalizedInitialUrl = initialUrl ? normalizeUrl(initialUrl) : "";
+
+  if (initialUrl && !normalizedInitialUrl) {
+    alert("Enter a valid reference URL.");
+    elements.taskUrl.focus();
+    return;
+  }
+
+  const task = createTask({
+    listId: state.selectedListId,
+    title: elements.taskTitle.value,
+    description: elements.taskDescription.value,
+    dueDate: elements.taskDate.value,
+    dueTime: elements.taskTime.value,
+    priority: elements.taskPriority.value,
+    reminderMinutes,
+    tags: elements.taskTags.value,
+    color: elements.taskColor.value,
+    order: nextOrder()
+  });
+
+  if (normalizedInitialUrl) {
+    task.urls.push({
+      id: uid("url"),
+      title: elements.taskUrlTitle.value.trim() || hostLabel(normalizedInitialUrl),
+      href: normalizedInitialUrl,
+      createdAt: now(),
+      updatedAt: now()
+    });
+  }
+
+  state.tasks.push(task);
+  state = await saveState(state);
+  elements.taskForm.reset();
+  elements.taskColor.value = "#4f8cff";
+  elements.customReminder.classList.add("hidden");
+  closeTaskForm();
+  render();
+});
+
+elements.exportBtn.addEventListener("click", exportBackup);
+elements.importInput.addEventListener("change", async () => {
+  const file = elements.importInput.files[0];
+  if (!file) return;
+  state = await importBackup(file);
+  elements.importInput.value = "";
+  render();
+});
+
+elements.editForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const task = findActiveTask();
+  if (!task) return;
+  Object.assign(task, {
+    title: elements.editTitle.value.trim(),
+    description: elements.editDescription.value.trim(),
+    dueDate: elements.editDate.value,
+    dueTime: elements.editTime.value,
+    completed: elements.editStatus.value === "completed",
+    priority: elements.editPriority.value,
+    color: elements.editColor.value,
+    tags: parseTags(elements.editTags.value),
+    updatedAt: now(),
+    remindedAt: 0,
+    overdueNotifiedAt: 0
+  });
+  state = await saveState(state);
+  elements.taskDialog.close();
+  activeTaskId = null;
+  render();
+});
+
+elements.addCommentBtn.addEventListener("click", async () => {
+  const task = findActiveTask();
+  const body = elements.newComment.value.trim();
+  if (!task || !body) return;
+  task.comments.push({ id: uid("comment"), body, createdAt: now(), updatedAt: now() });
+  elements.newComment.value = "";
+  state = await saveState(state);
+  renderEditorCollections(task);
+  renderTasks();
+});
+
+elements.addUrlBtn.addEventListener("click", async () => {
+  const task = findActiveTask();
+  const href = normalizeUrl(elements.newUrl.value);
+  if (!task || !href) {
+    alert("Enter a valid URL.");
+    return;
+  }
+  task.urls.push({
+    id: uid("url"),
+    title: elements.newUrlTitle.value.trim() || hostLabel(href),
+    href,
+    createdAt: now(),
+    updatedAt: now()
+  });
+  elements.newUrlTitle.value = "";
+  elements.newUrl.value = "";
+  state = await saveState(state);
+  renderEditorCollections(task);
+  renderTasks();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.ctrlKey && event.key.toLowerCase() === "n") {
+    event.preventDefault();
+    openTaskForm();
+  }
+  if (event.key === "/" && document.activeElement.tagName !== "INPUT" && document.activeElement.tagName !== "TEXTAREA") {
+    event.preventDefault();
+    elements.searchInput.focus();
+  }
+  if (event.key === "Escape" && elements.taskDialog.open) elements.taskDialog.close();
+});
+
+function render() {
+  renderLists();
+  renderDashboard();
+  renderTasks();
+}
+
+function openTaskForm() {
+  elements.taskForm.classList.remove("is-collapsed");
+  elements.addTaskToggle.setAttribute("aria-expanded", "true");
+  elements.taskTitle.focus();
+}
+
+function closeTaskForm() {
+  elements.taskForm.reset();
+  elements.taskColor.value = "#4f8cff";
+  elements.customReminder.classList.add("hidden");
+  elements.taskForm.classList.add("is-collapsed");
+  elements.addTaskToggle.setAttribute("aria-expanded", "false");
+}
+
+function renderLists() {
+  elements.listSelect.innerHTML = state.lists
+    .map((list) => `<option value="${list.id}" ${list.id === state.selectedListId ? "selected" : ""}>${escapeHtml(list.name)}</option>`)
+    .join("");
+}
+
+function renderDashboard() {
+  const total = state.tasks.length;
+  const completed = state.tasks.filter((task) => task.completed).length;
+  const pending = total - completed;
+  const overdue = state.tasks.filter((task) => isOverdue(task)).length;
+  const today = state.tasks.filter((task) => isToday(task)).length;
+  const percent = total ? Math.round((completed / total) * 100) : 0;
+
+  elements.dashboard.innerHTML = [
+    ["Total", total],
+    ["Done", completed],
+    ["Pending", pending],
+    ["Overdue", overdue],
+    ["Today", today]
+  ]
+    .map(([label, value]) => statCard(label, value))
+    .join("");
+  elements.progressLabel.textContent = `${percent}%`;
+  elements.progressFill.style.width = `${percent}%`;
+}
+
+function renderTasks() {
+  const tasks = filteredTasks();
+  if (!tasks.length) {
+    elements.taskList.innerHTML = `<div class="empty-state">No tasks found.</div>`;
+    renderDashboard();
+    return;
+  }
+
+  elements.taskList.innerHTML = tasks.map(taskTemplate).join("");
+  bindTaskActions();
+  renderDashboard();
+}
+
+function taskTemplate(task) {
+  const overdue = isOverdue(task);
+  const classes = ["task-card", overdue ? "is-overdue" : "", task.completed ? "is-complete" : ""].join(" ");
+  const tags = task.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("");
+  const urls = task.urls
+    .slice(0, 3)
+    .map((url) => `<img src="${faviconFor(url.href)}" alt="" title="${escapeHtml(url.title)}">`)
+    .join("");
+
+  return `
+    <article class="${classes}" draggable="true" data-id="${task.id}" style="--label:${task.color}">
+      <div class="task-strip"></div>
+      <div class="task-main">
+        <div class="task-title-row">
+          <label class="check-wrap">
+            <input type="checkbox" data-action="complete" ${task.completed ? "checked" : ""}>
+            <span></span>
+          </label>
+          <button class="task-title" data-action="edit">${escapeHtml(task.title)}</button>
+          <button class="mini-button ${task.pinned ? "active" : ""}" data-action="pin" title="Pin">⌃</button>
+          <button class="mini-button ${task.favorite ? "active" : ""}" data-action="favorite" title="Favorite">★</button>
+        </div>
+        <p>${escapeHtml(task.description || "No description")}</p>
+        <div class="task-meta">
+          <span class="priority ${task.priority}">${task.priority}</span>
+          <span>${formatDateTime(task)}</span>
+          <span class="${overdue ? "danger-text" : ""}">${formatRemaining(task)}</span>
+        </div>
+        <div class="tag-row">${tags}</div>
+        <div class="url-icons">${urls}</div>
+      </div>
+      <div class="task-actions">
+        <button class="mini-button" data-action="edit" title="Edit">✎</button>
+        <button class="mini-button danger" data-action="delete" title="Delete">×</button>
+      </div>
+    </article>
+  `;
+}
+
+function bindTaskActions() {
+  elements.taskList.querySelectorAll(".task-card").forEach((card) => {
+    card.addEventListener("dragstart", () => card.classList.add("dragging"));
+    card.addEventListener("dragend", async () => {
+      card.classList.remove("dragging");
+      await persistOrderFromDom();
+    });
+    card.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      const dragging = elements.taskList.querySelector(".dragging");
+      if (!dragging || dragging === card) return;
+      const offset = event.clientY - card.getBoundingClientRect().top;
+      elements.taskList.insertBefore(dragging, offset > card.offsetHeight / 2 ? card.nextSibling : card);
+    });
+  });
+
+  elements.taskList.querySelectorAll("[data-action]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      const card = event.target.closest(".task-card");
+      const task = state.tasks.find((item) => item.id === card.dataset.id);
+      const action = event.currentTarget.dataset.action;
+      if (!task) return;
+      if (action === "complete") task.completed = event.currentTarget.checked;
+      if (action === "pin") task.pinned = !task.pinned;
+      if (action === "favorite") task.favorite = !task.favorite;
+      if (action === "delete") {
+        if (!confirm(`Delete "${task.title}"?`)) return;
+        state.tasks = state.tasks.filter((item) => item.id !== task.id);
+      }
+      if (action === "edit") {
+        openEditor(task.id);
+        return;
+      }
+      task.updatedAt = now();
+      state = await saveState(state);
+      render();
+    });
+  });
+}
+
+function openEditor(taskId) {
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task) return;
+  activeTaskId = taskId;
+  elements.editTitle.value = task.title;
+  elements.editDescription.value = task.description;
+  elements.editDate.value = task.dueDate;
+  elements.editTime.value = task.dueTime;
+  elements.editStatus.value = task.completed ? "completed" : "pending";
+  elements.editPriority.value = task.priority;
+  elements.editColor.value = task.color;
+  elements.editTags.value = task.tags.join(", ");
+  renderEditorCollections(task);
+  elements.taskDialog.showModal();
+  elements.editTitle.focus();
+}
+
+function renderEditorCollections(task) {
+  elements.commentsList.innerHTML = task.comments.length
+    ? task.comments.map((comment) => commentTemplate(comment)).join("")
+    : `<div class="subtle-empty">No notes yet.</div>`;
+  elements.urlsList.innerHTML = task.urls.length
+    ? task.urls.map((url) => urlTemplate(url)).join("")
+    : `<div class="subtle-empty">No links yet.</div>`;
+
+  elements.commentsList.querySelectorAll("[data-comment]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.dataset.comment;
+      if (button.dataset.action === "delete") task.comments = task.comments.filter((comment) => comment.id !== id);
+      if (button.dataset.action === "edit") {
+        const comment = task.comments.find((item) => item.id === id);
+        const next = prompt("Edit note", comment.body);
+        if (next?.trim()) {
+          comment.body = next.trim();
+          comment.updatedAt = now();
+        }
+      }
+      state = await saveState(state);
+      renderEditorCollections(task);
+      renderTasks();
+    });
+  });
+
+  elements.urlsList.querySelectorAll("[data-url]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const id = button.dataset.url;
+      const link = task.urls.find((item) => item.id === id);
+      if (button.dataset.action === "open") await chrome.tabs.create({ url: link.href });
+      if (button.dataset.action === "delete") task.urls = task.urls.filter((url) => url.id !== id);
+      if (button.dataset.action === "edit") {
+        const next = prompt("Edit URL", link.href);
+        const normalized = normalizeUrl(next || "");
+        if (normalized) {
+          link.href = normalized;
+          link.title = prompt("Edit label", link.title)?.trim() || hostLabel(normalized);
+          link.updatedAt = now();
+        }
+      }
+      state = await saveState(state);
+      renderEditorCollections(task);
+      renderTasks();
+    });
+  });
+}
+
+function commentTemplate(comment) {
+  return `
+    <article class="collection-row">
+      <p>${escapeHtml(comment.body)}</p>
+      <div>
+        <button class="mini-button" type="button" data-action="edit" data-comment="${comment.id}">✎</button>
+        <button class="mini-button danger" type="button" data-action="delete" data-comment="${comment.id}">×</button>
+      </div>
+    </article>
+  `;
+}
+
+function urlTemplate(url) {
+  return `
+    <article class="collection-row url-item">
+      <button class="link-button" type="button" data-action="open" data-url="${url.id}">
+        <img src="${faviconFor(url.href)}" alt="">
+        <span>${escapeHtml(url.title || hostLabel(url.href))}</span>
+      </button>
+      <div>
+        <button class="mini-button" type="button" data-action="edit" data-url="${url.id}">✎</button>
+        <button class="mini-button danger" type="button" data-action="delete" data-url="${url.id}">×</button>
+      </div>
+    </article>
+  `;
+}
+
+function filteredTasks() {
+  const query = elements.searchInput.value.trim().toLowerCase();
+  const listTasks = state.tasks.filter((task) => task.listId === state.selectedListId);
+  const dateMatched = listTasks.filter(matchesDateFilter);
+  const matched = query ? dateMatched.filter((task) => searchableText(task).includes(query)) : dateMatched;
+  return matched.sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
+    if (elements.sortSelect.value === "pending") return Number(a.completed) - Number(b.completed);
+    if (elements.sortSelect.value === "completed") return Number(b.completed) - Number(a.completed);
+    if (elements.sortSelect.value === "due") return deadlineSort(a, b);
+    if (elements.sortSelect.value === "recent") return b.createdAt - a.createdAt;
+    const priority = priorityRank(b.priority) - priorityRank(a.priority);
+    return a.order - b.order || priority;
+  });
+}
+
+function matchesDateFilter(task) {
+  const filter = elements.dateFilter.value;
+  if (filter === "all") return true;
+  if (filter === "today") return isToday(task);
+  if (filter === "overdue") return isOverdue(task);
+  if (filter === "nodate") return !task.dueDate;
+  if (filter === "upcoming") {
+    const deadline = getDeadline(task);
+    return Boolean(deadline && !task.completed && deadline.getTime() >= Date.now());
+  }
+  if (filter === "custom") {
+    return Boolean(elements.customDateFilter.value && task.dueDate === elements.customDateFilter.value);
+  }
+  return true;
+}
+
+function deadlineSort(a, b) {
+  const aTime = getDeadline(a)?.getTime() || Number.MAX_SAFE_INTEGER;
+  const bTime = getDeadline(b)?.getTime() || Number.MAX_SAFE_INTEGER;
+  return aTime - bTime;
+}
+
+async function persistOrderFromDom() {
+  const ids = [...elements.taskList.querySelectorAll(".task-card")].map((card) => card.dataset.id);
+  ids.forEach((id, index) => {
+    const task = state.tasks.find((item) => item.id === id);
+    if (task) task.order = index;
+  });
+  state = await saveState(state);
+  renderTasks();
+}
+
+function nextOrder() {
+  return state.tasks.filter((task) => task.listId === state.selectedListId).length;
+}
+
+function currentList() {
+  return state.lists.find((list) => list.id === state.selectedListId) || state.lists[0];
+}
+
+function findActiveTask() {
+  return state.tasks.find((task) => task.id === activeTaskId);
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}

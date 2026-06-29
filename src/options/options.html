@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Notebook Task Manager Settings</title>
+    <link rel="stylesheet" href="../styles/app.css">
+  </head>
+  <body class="options-body">
+    <main class="options-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Settings</p>
+          <h1>Notebook Task Manager</h1>
+        </div>
+        <button class="icon-button" id="themeToggle" title="Toggle theme" aria-label="Toggle theme">◐</button>
+      </header>
+
+      <section class="settings-grid">
+        <article class="settings-panel">
+          <h2>Backup</h2>
+          <p>Export or restore the complete local notebook data.</p>
+          <div class="backup-panel inline">
+            <button class="primary-button" id="exportBtn">Export JSON</button>
+            <label class="secondary-button file-button">
+              Import JSON
+              <input id="importInput" type="file" accept="application/json">
+            </label>
+          </div>
+        </article>
+
+        <article class="settings-panel">
+          <h2>About</h2>
+          <dl class="about-list">
+            <div><dt>Author</dt><dd>Sablu Hasan</dd></div>
+            <div><dt>Portfolio</dt><dd><a href="https://sablu-hasan.vercel.app/" target="_blank" rel="noreferrer">sablu-hasan.vercel.app</a></dd></div>
+            <div><dt>Version</dt><dd>1.0.0</dd></div>
+            <div><dt>License</dt><dd>MIT</dd></div>
+            <div><dt>Credits</dt><dd>Built with Manifest V3, Chrome Storage, Alarms, and Notifications.</dd></div>
+          </dl>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="./options.js"></script>
+  </body>
+</html>
