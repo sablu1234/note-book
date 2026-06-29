@@ -11,6 +11,7 @@ let activeTaskId = null;
 let showAllCompleted = false;
 
 const COMPLETED_PREVIEW_LIMIT = 3;
+const PROJECT_ALERT_MS = 60 * 60 * 60 * 1000;
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -20,6 +21,7 @@ const elements = {
   progressFill: $("#progressFill"),
   themeToggle: $("#themeToggle"),
   searchInput: $("#searchInput"),
+  taskTypeSelect: $("#taskTypeSelect"),
   listSelect: $("#listSelect"),
   sortSelect: $("#sortSelect"),
   dateFilter: $("#dateFilter"),
@@ -49,6 +51,7 @@ const elements = {
   editDescription: $("#editDescription"),
   editDate: $("#editDate"),
   editTime: $("#editTime"),
+  editTaskType: $("#editTaskType"),
   editStatus: $("#editStatus"),
   editPriority: $("#editPriority"),
   editColor: $("#editColor"),
@@ -74,6 +77,13 @@ elements.themeToggle.addEventListener("click", async () => {
 });
 
 elements.searchInput.addEventListener("input", renderTasks);
+elements.taskTypeSelect.addEventListener("change", async () => {
+  state.selectedTaskType = elements.taskTypeSelect.value;
+  showAllCompleted = false;
+  closeTaskForm();
+  state = await saveState(state);
+  render();
+});
 elements.sortSelect.addEventListener("change", renderTasks);
 elements.dateFilter.addEventListener("change", () => {
   elements.customDateFilter.classList.toggle("hidden", elements.dateFilter.value !== "custom");
@@ -141,8 +151,15 @@ elements.taskForm.addEventListener("submit", async (event) => {
     return;
   }
 
+  if (state.selectedTaskType === "project" && (!elements.taskDate.value || !elements.taskTime.value)) {
+    alert("Running Project needs a deadline date and time.");
+    (!elements.taskDate.value ? elements.taskDate : elements.taskTime).focus();
+    return;
+  }
+
   const task = createTask({
     listId: state.selectedListId,
+    type: state.selectedTaskType,
     title: elements.taskTitle.value,
     description: elements.taskDescription.value,
     dueDate: elements.taskDate.value,
@@ -188,11 +205,18 @@ elements.editForm.addEventListener("submit", async (event) => {
   if (!task) return;
   const nextCompleted = elements.editStatus.value === "completed";
   const completionComment = getEditedCompletionComment();
+  if (elements.editTaskType.value === "project" && (!elements.editDate.value || !elements.editTime.value)) {
+    alert("Running Project needs a deadline date and time.");
+    (!elements.editDate.value ? elements.editDate : elements.editTime).focus();
+    return;
+  }
+
   Object.assign(task, {
     title: elements.editTitle.value.trim(),
     description: elements.editDescription.value.trim(),
     dueDate: elements.editDate.value,
     dueTime: elements.editTime.value,
+    type: elements.editTaskType.value,
     completed: nextCompleted,
     completedAt: nextCompleted ? task.completedAt || now() : 0,
     completionComment: nextCompleted ? completionComment : "",
@@ -201,7 +225,8 @@ elements.editForm.addEventListener("submit", async (event) => {
     tags: parseTags(elements.editTags.value),
     updatedAt: now(),
     remindedAt: 0,
-    overdueNotifiedAt: 0
+    overdueNotifiedAt: 0,
+    projectAlertNotifiedAt: 0
   });
   state = await saveState(state);
   elements.taskDialog.close();
@@ -254,9 +279,19 @@ document.addEventListener("keydown", (event) => {
 });
 
 function render() {
+  renderTaskType();
   renderLists();
   renderDashboard();
   renderTasks();
+}
+
+function renderTaskType() {
+  state.selectedTaskType = state.selectedTaskType || "daily";
+  elements.taskTypeSelect.value = state.selectedTaskType;
+  elements.addTaskToggle.querySelector("strong").textContent =
+    state.selectedTaskType === "project" ? "Add Running Project" : "Add New Task";
+  elements.taskTitle.placeholder =
+    state.selectedTaskType === "project" ? "New project title" : "New task title";
 }
 
 function openTaskForm() {
@@ -280,11 +315,12 @@ function renderLists() {
 }
 
 function renderDashboard() {
-  const total = state.tasks.length;
-  const completed = state.tasks.filter((task) => task.completed).length;
+  const scopedTasks = tasksForCurrentType();
+  const total = scopedTasks.length;
+  const completed = scopedTasks.filter((task) => task.completed).length;
   const pending = total - completed;
-  const overdue = state.tasks.filter((task) => isOverdue(task)).length;
-  const today = state.tasks.filter((task) => isToday(task)).length;
+  const overdue = scopedTasks.filter((task) => isOverdue(task)).length;
+  const today = scopedTasks.filter((task) => isToday(task)).length;
   const percent = total ? Math.round((completed / total) * 100) : 0;
 
   elements.dashboard.innerHTML = [
@@ -347,7 +383,13 @@ function completedToggleTemplate(tasks) {
 
 function taskTemplate(task) {
   const overdue = isOverdue(task);
-  const classes = ["task-card", overdue ? "is-overdue" : "", task.completed ? "is-complete" : ""].join(" ");
+  const projectAlert = isProjectAlert(task);
+  const classes = [
+    "task-card",
+    overdue ? "is-overdue" : "",
+    projectAlert ? "is-project-alert" : "",
+    task.completed ? "is-complete" : ""
+  ].join(" ");
   const tags = task.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("");
   const urls = task.urls
     .slice(0, 3)
@@ -370,9 +412,11 @@ function taskTemplate(task) {
         <p>${escapeHtml(task.description || "No description")}</p>
         ${task.completed && task.completionComment ? `<p class="completion-note">${escapeHtml(task.completionComment)}</p>` : ""}
         <div class="task-meta">
+          <span class="type-pill ${task.type === "project" ? "project" : "daily"}">${task.type === "project" ? "project" : "daily"}</span>
           <span class="priority ${task.priority}">${task.priority}</span>
           <span>${formatDateTime(task)}</span>
           <span class="${overdue ? "danger-text" : ""}">${formatRemaining(task)}</span>
+          ${projectAlert ? `<span class="red-alert">Red alert</span>` : ""}
         </div>
         <div class="tag-row">${tags}</div>
         <div class="url-icons">${urls}</div>
@@ -443,6 +487,7 @@ function openEditor(taskId) {
   elements.editDescription.value = task.description;
   elements.editDate.value = task.dueDate;
   elements.editTime.value = task.dueTime;
+  elements.editTaskType.value = task.type || "daily";
   elements.editStatus.value = task.completed ? "completed" : "pending";
   elements.editPriority.value = task.priority;
   elements.editColor.value = task.color;
@@ -531,7 +576,7 @@ function urlTemplate(url) {
 
 function filteredTasks() {
   const query = elements.searchInput.value.trim().toLowerCase();
-  const listTasks = state.tasks.filter((task) => task.listId === state.selectedListId);
+  const listTasks = tasksForCurrentType();
   const dateMatched = listTasks.filter(matchesDateFilter);
   const matched = query ? dateMatched.filter((task) => searchableText(task).includes(query)) : dateMatched;
   return matched.sort((a, b) => {
@@ -545,6 +590,18 @@ function filteredTasks() {
     const priority = priorityRank(b.priority) - priorityRank(a.priority);
     return recentSort(a, b) || priority || a.order - b.order;
   });
+}
+
+function tasksForCurrentType() {
+  const selectedType = state.selectedTaskType || "daily";
+  return state.tasks.filter((task) => task.listId === state.selectedListId && (task.type || "daily") === selectedType);
+}
+
+function isProjectAlert(task) {
+  if ((task.type || "daily") !== "project" || task.completed) return false;
+  const deadline = getDeadline(task);
+  if (!deadline) return false;
+  return deadline.getTime() - Date.now() <= PROJECT_ALERT_MS;
 }
 
 function recentSort(a, b) {

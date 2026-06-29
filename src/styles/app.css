@@ -249,9 +249,13 @@ h3 {
 
 .toolbar {
   display: grid;
-  grid-template-columns: 1fr 116px 116px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 10px;
+}
+
+.toolbar .search-field {
+  grid-column: 1 / -1;
 }
 
 .filter-row {
@@ -475,6 +479,11 @@ textarea:focus {
   background: linear-gradient(0deg, var(--danger-bg), var(--surface));
 }
 
+.task-card.is-project-alert {
+  border-color: rgba(220, 38, 38, 0.62);
+  box-shadow: 0 12px 34px rgba(220, 38, 38, 0.18);
+}
+
 .task-card.is-complete {
   opacity: 0.72;
 }
@@ -541,11 +550,28 @@ textarea:focus {
 }
 
 .priority,
-.tag-row span {
+.tag-row span,
+.type-pill,
+.red-alert {
   border-radius: 999px;
   padding: 3px 8px;
   font-size: 11px;
   font-weight: 800;
+}
+
+.type-pill.daily {
+  background: rgba(15, 118, 110, 0.13);
+  color: var(--accent-2);
+}
+
+.type-pill.project,
+.red-alert {
+  background: rgba(220, 38, 38, 0.13);
+  color: var(--danger);
+}
+
+.red-alert {
+  text-transform: uppercase;
 }
 
 .priority.low {

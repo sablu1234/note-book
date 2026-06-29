@@ -36,6 +36,10 @@
           <span>⌕</span>
           <input id="searchInput" type="search" placeholder="Search tasks, notes, tags, URLs" autocomplete="off">
         </div>
+        <select id="taskTypeSelect" aria-label="Task type">
+          <option value="daily">Daily Task</option>
+          <option value="project">Running Project</option>
+        </select>
         <select id="listSelect" aria-label="Task list"></select>
         <select id="sortSelect" aria-label="Sort tasks">
           <option value="manual">Manual</option>
@@ -129,6 +133,12 @@
         <div class="form-grid">
           <input id="editDate" type="date">
           <input id="editTime" type="time">
+          <select id="editTaskType" aria-label="Task type">
+            <option value="daily">Daily Task</option>
+            <option value="project">Running Project</option>
+          </select>
+        </div>
+        <div class="form-grid">
           <select id="editStatus" aria-label="Task status">
             <option value="pending">Pending</option>
             <option value="completed">Completed</option>

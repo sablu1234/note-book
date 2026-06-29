@@ -39,6 +39,7 @@ export function sanitizeState(state) {
     version: 1,
     theme: state.theme === "dark" ? "dark" : "light",
     selectedListId,
+    selectedTaskType: ["daily", "project"].includes(state.selectedTaskType) ? state.selectedTaskType : "daily",
     lists: lists.map((list) => ({
       id: String(list.id),
       name: String(list.name || "Untitled List"),
@@ -54,6 +55,7 @@ export function sanitizeState(state) {
             description: String(task.description || ""),
             dueDate: String(task.dueDate || ""),
             dueTime: String(task.dueTime || ""),
+            type: ["daily", "project"].includes(task.type) ? task.type : "daily",
             completed: Boolean(task.completed),
             pinned: Boolean(task.pinned),
             favorite: Boolean(task.favorite),
@@ -68,6 +70,7 @@ export function sanitizeState(state) {
             completionComment: String(task.completionComment || ""),
             remindedAt: Number(task.remindedAt || 0),
             overdueNotifiedAt: Number(task.overdueNotifiedAt || 0),
+            projectAlertNotifiedAt: Number(task.projectAlertNotifiedAt || 0),
             comments: Array.isArray(task.comments) ? task.comments : [],
             urls: Array.isArray(task.urls) ? task.urls : []
           }))
